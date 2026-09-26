@@ -379,18 +379,18 @@ const LS_KEY = 'travelPlanner.v2', LS_OLD = 'travelPlanner.v1';
 const DAY_COLORS = ['#e8590c','#1c7ed6','#2f9e44','#ae3ec9','#f08c00','#0c8599','#e03131','#5f3dc4','#66a80f','#c2255c'];
 const PALETTE = ['#e8590c','#1c7ed6','#2f9e44','#ae3ec9','#e03131','#0c8599','#f08c00','#5f3dc4','#c2255c','#66a80f'];
 const POOL_COLOR = '#adb5bd', TOGETHER = '#16181d';
-const CATS = {
+const CATS = Object.assign(Object.create(null), {
   sight:{label:'관광',stay:90}, food:{label:'식당',stay:60}, cafe:{label:'카페',stay:45},
   shop:{label:'쇼핑',stay:60}, stay:{label:'숙소',stay:0}, move:{label:'교통',stay:10}, etc:{label:'기타',stay:60}
-};
-const MODES = {
+});
+const MODES = Object.assign(Object.create(null), {
   foot:{label:'도보',osrm:'routed-foot',g:'walking',kmh:4.5},
   transit:{label:'대중교통',g:'transit'},
   car:{label:'자동차',osrm:'routed-car',g:'driving',kmh:30},
   bike:{label:'자전거',osrm:'routed-bike',g:'bicycling',kmh:14},
-};
+});
 // 구간 이동 수단(장소 p.via = {m, note, min} = '이 장소까지 오는 방법')
-const VIA = {
+const VIA = Object.assign(Object.create(null), {
   foot:{label:'도보', route:'foot', g:'walking'},
   subway:{label:'지하철', route:'transit', kmh:30, wait:6, gm:['SUBWAY','LIGHT_RAIL'], g:'transit'},
   bus:{label:'버스', route:'transit', kmh:18, wait:8, gm:['BUS'], g:'transit'},
@@ -401,7 +401,7 @@ const VIA = {
   bike:{label:'자전거', route:'bike', g:'bicycling'},
   ferry:{label:'배', kmh:25, wait:20, g:'transit'},
   plane:{label:'비행기', kmh:600, wait:120, g:'transit'},
-};
+});
 function viaFrom(text){
   const s = String(text || '').trim();
   if(/^(도보|걸어서|걷기)/.test(s)) return 'foot';
@@ -423,7 +423,7 @@ const COUNTRY_TZ = {kr:'Asia/Seoul',jp:'Asia/Tokyo',cn:'Asia/Shanghai',tw:'Asia/
   np:'Asia/Kathmandu',lk:'Asia/Colombo',mm:'Asia/Yangon',uz:'Asia/Tashkent',kz:'Asia/Almaty',il:'Asia/Jerusalem',jo:'Asia/Amman',qa:'Asia/Qatar',sa:'Asia/Riyadh',bn:'Asia/Brunei',mv:'Indian/Maldives',fj:'Pacific/Fiji',pw:'Pacific/Palau',ge:'Asia/Tbilisi',am:'Asia/Yerevan',az:'Asia/Baku'};
 const TZ_LIST = ['Asia/Seoul','Asia/Tokyo','Asia/Shanghai','Asia/Taipei','Asia/Hong_Kong','Asia/Bangkok','Asia/Ho_Chi_Minh','Asia/Manila','Asia/Singapore','Asia/Kuala_Lumpur','Asia/Jakarta','Asia/Makassar','Asia/Kolkata','Asia/Dubai','Europe/London','Europe/Paris','Europe/Berlin','Europe/Rome','Europe/Madrid','Europe/Istanbul','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','Pacific/Honolulu','Pacific/Guam','Australia/Sydney','Australia/Brisbane','Australia/Perth','Pacific/Auckland'];
 const LEVEL_R = {1:80000, 2:12000, 3:1500};
-const WHEN = {am:{label:'아침', t:570}, noon:{label:'점심', t:750}, pm:{label:'오후', t:900}, eve:{label:'저녁', t:1110}, night:{label:'밤', t:1230}};   // 가고 싶은 시간대(분)
+const WHEN = Object.assign(Object.create(null), {am:{label:'아침', t:570}, noon:{label:'점심', t:750}, pm:{label:'오후', t:900}, eve:{label:'저녁', t:1110}, night:{label:'밤', t:1230}});   // 가고 싶은 시간대(분)
 function whenFrom(text){
   const s = String(text || '');
   if(/야경|밤|야간|심야/.test(s)) return 'night';
@@ -500,6 +500,8 @@ function scrub(v, depth = 0){
   return v;
 }
 const isObj = x => !!x && typeof x === 'object' && !Array.isArray(x);
+// 구글 지도 링크는 구글 주소만(공유 문서는 누구나 고칠 수 있어 다른 사이트로 보내는 링크를 막음)
+const okGmaps = u => { try{ const x = new URL(String(u)); return x.protocol === 'https:' && /(^|\.)google\.[a-z.]+$|^(maps\.app\.)?goo\.gl$/i.test(x.hostname); }catch(e){ return false; } };
 function normDoc(doc){
   if(!isObj(doc)) return doc;
   if(!isObj(doc.meta)) doc.meta = {name:'여행', days:1};
@@ -544,6 +546,7 @@ function normDoc(doc){
   for(const p of Object.values(doc.places)){
     if(!isObj(p)) continue;
     for(const k of ['name','addr','memo','hoursText','cat','area','gmaps','gid','by']) if(p[k] != null && typeof p[k] !== 'string') p[k] = '';
+    if(p.gmaps && !okGmaps(p.gmaps)) p.gmaps = '';
     if(p.who != null && !(Array.isArray(p.who) && p.who.every(x => typeof x === 'string'))) p.who = null;
     if(p.hours != null && !(Array.isArray(p.hours) && p.hours.every(h => Array.isArray(h) && h.length === 3 && h.every(Number.isFinite)))) p.hours = null;
     for(const k of ['rating','reviews']) if(p[k] != null && !Number.isFinite(p[k])) delete p[k];
@@ -1364,9 +1367,10 @@ async function googleTransitLeg(t, d, a, b, depMin, gm, ahead = 0){
   const dm = Math.round(depMin);
   let depMs = localToUtc(tz, dp.y, dp.m, dp.d - 7*ahead, dm), shifted = 0;
   if(depMs < Date.now() + 60000) shifted = Math.max(0, Math.floor((Date.now() - depMs) / (7*86400000)));
-  while(depMs < Date.now() + 60000){ shifted++; depMs = localToUtc(tz, dp.y, dp.m, dp.d + 7*shifted, dm); }   // 지난 날짜면 같은 요일·같은 현지 시각으로(서머타임 고려)
+  while(depMs < Date.now() + 60000){ shifted++; depMs = localToUtc(tz, dp.y, dp.m, dp.d - 7*ahead + 7*shifted, dm); }   // 지난 날짜면 같은 요일·같은 현지 시각으로(서머타임 고려)
   const key = `${a.lat},${a.lng}>${b.lat},${b.lng}@${depMs}` + (gm ? '/' + gm.join('+') : '');
-  if(legCache.has(key)) return legCache.get(key);
+  const hit = legCache.get(key);
+  if(hit){ if(hit.nf) throw new Error('구글 대중교통 경로를 찾지 못함'); return hit; }
   if(gBudget <= 0) throw new Error('구글 대중교통 조회를 이번에 너무 많이 해서 추정치로 보여줘요');
   gBudget--;
   const pt = p => ({location:{latLng:{latitude:p.lat, longitude:p.lng}}});
@@ -1379,8 +1383,12 @@ async function googleTransitLeg(t, d, a, b, depMin, gm, ahead = 0){
   const route = j.routes?.[0];
   if(!route){
     // 먼 날짜라 시간표가 아직 없으면 가장 가까운 같은 요일(다음 주 안) 시간표로 한 번 더
-    const weeks = Math.floor((depMs - Date.now()) / (7*86400000));
-    if(!ahead && weeks >= 1){ const leg = await googleTransitLeg(t, d, a, b, depMin, gm, weeks); legCache.set(key, leg); return leg; }
+    const weeks = !ahead && !shifted ? weeksAhead(tz, dp, dm) : 0;
+    if(weeks >= 1){
+      try{ const leg = await googleTransitLeg(t, d, a, b, depMin, gm, weeks); legCache.set(key, leg); return leg; }
+      catch(e){ if(isNF(e)) legCache.set(key, {nf:true}); throw e; }
+    }
+    legCache.set(key, {nf:true});
     throw new Error('구글 대중교통 경로를 찾지 못함');
   }
   const steps = [], segs = [];
@@ -1407,29 +1415,44 @@ async function googleTransitLeg(t, d, a, b, depMin, gm, ahead = 0){
     const arr = Date.parse(steps[li].arrT)/1000 + steps.slice(li+1).reduce((x, s) => x + s.sec, 0);
     if(Number.isFinite(arr)) dur = Math.max(dur, arr - depMs/1000);   // 첫 차 기다리는 시간 포함
   }
-  const leg = {dur, dist:route.distanceMeters || 0, steps, segs, shifted, ahead, g:true};
+  const leg = {dur, dist:route.distanceMeters || 0, steps, segs, shifted:ahead ? 0 : shifted, ahead, g:true};
   legCache.set(key, leg);
   return leg;
 }
 /* 무료 대중교통 경로 Transitous(MOTIS): 구글이 대중교통을 주지 않는 일본에서 철도·지하철 노선대로. 출처 https://transitous.org/sources/ */
 let tBudget = 150;   // 한 번 열 때 최대 조회 수(자원봉사로 운영되는 무료 서비스라 가볍게)
 const inJapan = p => p.lat > 24 && p.lat < 46 && p.lng > 122.5 && p.lng < 146.5;
+const isNF = e => /찾지 못함/.test(String((e && e.message) || e || ''));   // 다시 물어도 같은 '노선 없음'
+// 날짜를 몇 주 앞당기면 가장 가까운(아직 지나지 않은) 같은 요일인지: 현지 달력 기준으로 셈
+function weeksAhead(tz, dp, dm){
+  let w = Math.floor((localToUtc(tz, dp.y, dp.m, dp.d, dm) - Date.now()) / (7*86400000));
+  while(w > 0 && localToUtc(tz, dp.y, dp.m, dp.d - 7*w, dm) < Date.now() + 60000) w--;
+  return Math.max(0, w);
+}
+// 고른 수단 → MOTIS transitModes(일본 자료는 지하철도 REGIONAL_RAIL이라 철도 묶음으로)
+const motisModes = gm => !gm ? '' : gm.includes('BUS') ? 'BUS,COACH' : 'RAIL,SUBWAY,METRO,TRAM';
 const pathLen = pts => pts.slice(1).reduce((s, q, i) => s + hav({lat:pts[i][0], lng:pts[i][1]}, {lat:q[0], lng:q[1]}), 0);
-async function transitousLeg(t, d, a, b, depMin, ahead = 0){
-  const dp = dayDateParts(t, d), tz = dayTz(t, d), dm = Math.round(depMin);
+async function transitousLeg(t, d, a, b, depMin, gm, ahead = 0){
+  const dp = dayDateParts(t, d), tz = dayTz(t, d), dm = Math.round(depMin), modes = motisModes(gm);
   let depMs = localToUtc(tz, dp.y, dp.m, dp.d - 7*ahead, dm), shifted = 0;
   while(depMs < Date.now() + 60000){ shifted++; depMs = localToUtc(tz, dp.y, dp.m, dp.d - 7*ahead + 7*shifted, dm); }   // 지난 날짜면 같은 요일로
-  const key = `T|${a.lat},${a.lng}>${b.lat},${b.lng}@${depMs}`;
-  if(legCache.has(key)) return legCache.get(key);
+  const key = `T|${a.lat},${a.lng}>${b.lat},${b.lng}@${depMs}|${modes}`;
+  const hit = legCache.get(key);
+  if(hit){ if(hit.nf) throw new Error('대중교통 노선을 찾지 못함'); return hit; }
   if(tBudget <= 0) throw new Error('대중교통 조회를 이번에 너무 많이 해서 추정치로 보여줘요');
   tBudget--;
   const q = new URLSearchParams({fromPlace:`${a.lat},${a.lng}`, toPlace:`${b.lat},${b.lng}`, time:new Date(depMs).toISOString(), numItineraries:'3'});
+  if(modes) q.set('transitModes', modes);
   const j = await getJSON('https://api.transitous.org/api/v5/plan?' + q);
   const its = (j && Array.isArray(j.itineraries) ? j.itineraries : []).filter(it => Array.isArray(it.legs) && it.legs.some(l => l.mode !== 'WALK'));
   if(!its.length){
     // 먼 날짜라 시간표가 아직 없으면 가장 가까운 같은 요일(다음 주 안) 시간표로 한 번 더
-    const weeks = Math.floor((depMs - Date.now()) / (7*86400000));
-    if(!ahead && !shifted && weeks >= 1){ const leg = await transitousLeg(t, d, a, b, depMin, weeks); legCache.set(key, leg); return leg; }
+    const weeks = !ahead && !shifted ? weeksAhead(tz, dp, dm) : 0;
+    if(weeks >= 1){
+      try{ const leg = await transitousLeg(t, d, a, b, depMin, gm, weeks); legCache.set(key, leg); return leg; }
+      catch(e){ if(isNF(e)) legCache.set(key, {nf:true}); throw e; }
+    }
+    legCache.set(key, {nf:true});
     throw new Error('대중교통 노선을 찾지 못함');
   }
   const best = its.slice().sort((x, y) => Date.parse(x.endTime) - Date.parse(y.endTime))[0];
@@ -1454,17 +1477,18 @@ async function transitousLeg(t, d, a, b, depMin, ahead = 0){
     }
   }
   const dur = Math.max(60, (Date.parse(best.endTime) - depMs) / 1000);   // 첫 차 기다리는 시간 포함
-  const leg = {dur, dist:dist || hav(a, b) * 1.3, steps, segs, shifted, ahead, tr:true};
+  const leg = {dur, dist:dist || hav(a, b) * 1.3, steps, segs, shifted:ahead ? 0 : shifted, ahead, tr:true};
   legCache.set(key, leg);
   return leg;
 }
 // 실제 대중교통: 일본은 Transitous(구글은 일본 대중교통을 API로 주지 않음), 그 밖은 구글 키가 있으면 구글 → 없거나 실패하면 Transitous
 async function realTransitLeg(t, d, a, b, depMin, gm){
-  if(gOn() && !(inJapan(a) && inJapan(b))){
+  const jp = dayTz(t, d) === 'Asia/Tokyo' && inJapan(a) && inJapan(b);
+  if(gOn() && !jp){
     try{ return await googleTransitLeg(t, d, a, b, depMin, gm); }
     catch(e){ if(gErrKo(e.message)) noteGoogleErr(e); }
   }
-  return transitousLeg(t, d, a, b, depMin);
+  return transitousLeg(t, d, a, b, depMin, gm);
 }
 async function transitRoute(t, d, ps){
   const cfg = effCfg(t, d);
@@ -1475,7 +1499,7 @@ async function transitRoute(t, d, ps){
     let leg;
     if(useReal){
       try{ leg = await realTransitLeg(t, d, ps[i], ps[i+1], cur); }
-      catch(e){ leg = estimateLeg(ps[i], ps[i+1], 'transit'); leg.err = noteGoogleErr(e); }
+      catch(e){ leg = estimateLeg(ps[i], ps[i+1], 'transit'); leg.err = noteGoogleErr(e); leg.nf = isNF(e); }
     }else leg = estimateLeg(ps[i], ps[i+1], 'transit');
     legs.push(leg); segs.push(...leg.segs); cur += leg.dur/60;
     cur = waitOpen(ps[i+1], dow, cur);
@@ -1516,15 +1540,16 @@ async function mixedRoute(t, d, ps){
       return estimateVia(a, b, m);
     };
     try{ leg = await calc(m, v); }
-    catch(e){ leg = estimateVia(a, b, air && m === 'transit' ? 'train' : m); leg.err = noteGoogleErr(e); }   // 못 찾으면 거리로(공항은 공항철도 속도)
+    catch(e){ leg = estimateVia(a, b, air && m === 'transit' ? 'train' : m); leg.err = noteGoogleErr(e); leg.nf = isNF(e); }   // 못 찾으면 거리로(공항은 공항철도 속도)
     leg = Object.assign({}, leg, {mode:m}, badPlane ? {badPlane:true} : {});
     // 도보인 날, 따로 정하지 않은 구간이 걸어서 30분 넘으면 지하철로(20km 넘게 멀면 기차)
     if(m === 'foot' && !VIA[via.m] && !air && !(Number.isFinite(via.min) && via.min > 0) && leg.dur > WALK_MAX){
       // 실제 대중교통(지하철·버스·기차 섞어서)으로 찾고, 못 찾으면 거리로 어림(20km 넘으면 기차)
-      let alt;
-      try{ alt = ps.length - 1 <= 25 ? await realTransitLeg(t, d, a, b, cur) : null; }catch(e){ alt = null; }
-      if(!alt){ const fm = farMode(a, b); alt = Object.assign(estimateVia(a, b, fm), {fm}); }
-      if(alt && alt.dur < leg.dur) leg = Object.assign({}, alt, {mode:alt.steps ? vehMode(alt.steps) : alt.fm, auto:true, walkDur:leg.dur});
+      let alt = null, altErr = null;
+      try{ alt = ps.length - 1 <= 25 ? await realTransitLeg(t, d, a, b, cur) : null; }catch(e){ altErr = e; }
+      if(alt && alt.steps && !alt.steps.some(x => x.type === 'transit')) alt = null;   // 걷기만 있는 결과는 대중교통이 아님
+      if(!alt){ const fm = farMode(a, b); alt = Object.assign(estimateVia(a, b, fm), {fm}, altErr && !isNF(altErr) ? {err:noteGoogleErr(altErr)} : {nf:true}); }
+      if(alt && alt.dur < leg.dur) leg = Object.assign({}, alt, {mode:alt.steps ? vehMode(alt.steps) : alt.fm, auto:true, walkDur:leg.dur}, badPlane ? {badPlane:true} : {});
     }
     if(Number.isFinite(via.min) && via.min > 0) leg = Object.assign(leg, {dur:via.min*60, manual:true});
     legs.push(leg); segs.push(...(leg.segs || []));
@@ -1572,7 +1597,7 @@ function ensureRoute(t, d, ps){
     routePending.add(k);
     const snap = ps.map(p => Object.assign({}, p));
     const expire = r => setTimeout(() => { if(routeRes.get(k) === r){ routeRes.delete(k); scheduleRender(); } }, 60000);   // 실패·추정치는 1분 뒤 다시 계산
-    computeRoute(t, d, snap).then(r => { routeRes.set(k, r); if(r && (r.err || r.legs.some(l => l.err))) expire(r); }).catch(e => {
+    computeRoute(t, d, snap).then(r => { routeRes.set(k, r); if(r && (r.err || r.legs.some(l => l.err && !l.nf))) expire(r); }).catch(e => {   // '노선 없음'은 다시 물어도 같아서 다시 계산 안 함
       const legs = []; for(let i = 0; i < snap.length-1; i++) legs.push(estimateLeg(snap[i], snap[i+1], 'foot'));
       const r = {legs, segs:legs.flatMap(l => l.segs), err:e.message}; routeRes.set(k, r); expire(r);
     }).finally(() => { routePending.delete(k); scheduleRender(); });
@@ -1980,7 +2005,7 @@ let markers = {}, tempMarker = null;
 const pinIcon = (color, label, name) => L.divIcon({className:'', html:`<div class="pin" style="--c:${safeColor(color)}"><span>${esc(label)}</span></div>${name ? `<b class="pinlbl off">${esc(String(name).length > 18 ? String(name).slice(0, 17) + '…' : name)}</b>` : ''}`, iconSize:[26,26], iconAnchor:[13,32], popupAnchor:[0,-28]});
 const dotIcon = color => L.divIcon({className:'', html:`<div class="dot" style="--c:${safeColor(color)}"></div>`, iconSize:[10,10], iconAnchor:[5,5], popupAnchor:[0,-6]});
 const dayColor = d => d > 0 ? DAY_COLORS[(d-1) % DAY_COLORS.length] : POOL_COLOR;
-const gPlaceUrl = p => (typeof p.gmaps === 'string' && /^https:\/\//.test(p.gmaps)) ? p.gmaps : `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+const gPlaceUrl = p => okGmaps(p.gmaps) ? p.gmaps : `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
 function gDirUrl(a, b, mode, via){
   const u = new URLSearchParams({api:'1', origin:`${a.lat},${a.lng}`, destination:`${b.lat},${b.lng}`, travelmode:MODES[mode].g});
   if(via && via.length) u.set('waypoints', via.map(p => `${p.lat},${p.lng}`).join('|'));
@@ -2423,7 +2448,7 @@ function renderDayTab(t, d){
       const move = all.legs.reduce((s, l) => s + l.dur, 0), dist = all.legs.reduce((s, l) => s + l.dist, 0), last = all.sch[all.sch.length-1];
       h += `<div class="summary">이동 <b>${fmtDur(move)}</b> · ${fmtDist(dist)} &nbsp;|&nbsp; ${fmtMin(all.sch[0].arr)} ${fl.pre ? '도착' : '시작'} → <b>${fmtMin(fl.post ? last.arr : last.dep)}</b> ${fl.post ? '공항 도착' : '종료'}</div>`;
       if(res && res.err) h += `<div class="warn">${esc(res.err)}</div>`;
-      if(cfg.mode === 'transit' && !gOn()) h += `<div class="warn">대중교통 시간은 거리 기반 <b>추정치</b>예요. 설정에 구글 API 키를 넣으면 실제 노선·시간표로 계산해요.</div>`;
+      if(cfg.mode === 'transit' && all.legs.some(l => l.est && !l.manual) && !(S.gkey && gBad)) h += `<div class="warn">일부 구간은 대중교통 노선을 찾지 못해 거리로 <b>추정</b>했어요(버스만 다니는 곳 등). 구간을 눌러 <b>구글 지도 앱에서 실제 노선 보기</b>로 확인해 보세요.${!S.gkey && dayTz(t, d) !== 'Asia/Tokyo' ? ' 설정에 구글 API 키를 넣으면 이 나라 대중교통도 실제 노선으로 계산해요.' : ''}</div>`;
     }
     h += dupWarn(t, d) + lateWarn(fl.post);
     if(S.gkey && gBad) h += `<div class="warn">${esc(gBad)} · 지금은 무료 계산(추정)으로 보여 줘요. 설정에서 키를 고치거나 지우면 이 알림이 사라져요.</div>`;
@@ -2877,7 +2902,7 @@ function settingsModal(){
   m.querySelector('#ssave').onclick = async () => {
     if(S.cur !== tid){ closeModal(); return; }
     const nk = m.querySelector('#skey').value.trim();
-    if(nk && nk !== S.gkey){   // 새 키는 저장 전에 확인
+    if(nk && (nk !== S.gkey || gBad)){   // 새 키(또는 문제가 났던 키)는 저장 전에 확인
       const b = m.querySelector('#ssave'); b.disabled = true; b.textContent = '키 확인 중…';
       const bad = await checkGoogleKey(nk);
       b.disabled = false; b.textContent = '저장';
@@ -2894,7 +2919,7 @@ function settingsModal(){
     }
     const tz = m.querySelector('#stz').value.trim();
     if(tz && tz !== orig.tz && tz !== tt.meta.tz){ if(!validTz(tz)){ toast('시간대 이름이 올바르지 않아요: '+tz); return; } ops.push(opSet(['meta','tz'], tz)); }
-    if(S.gkey !== nk) gBad = '';
+    if(S.gkey !== nk || gBad) gBad = '';
     S.gkey = nk;
     routeRes.clear(); save(); closeModal();
     if(ops.length) commit(ops); else renderAll();
@@ -3661,23 +3686,25 @@ function initSplit(){
   };
   apply(r, false); requestAnimationFrame(fill);
   h.addEventListener('pointerdown', e => {
-    drag = {y:e.clientY, r, moved:false}; h.setPointerCapture(e.pointerId); h.classList.add('on'); e.preventDefault();
+    if(!e.isPrimary || e.button !== 0 || drag) return;   // 두 번째 손가락·오른쪽 클릭은 무시
+    drag = {y:e.clientY, r, moved:false, id:e.pointerId}; h.setPointerCapture(e.pointerId); h.classList.add('on'); e.preventDefault();
   });
   h.addEventListener('pointermove', e => {
-    if(!drag) return;
+    if(!drag || e.pointerId !== drag.id) return;
     const dy = e.clientY - drag.y; if(Math.abs(dy) > 4) drag.moved = true;
     if(!drag.moved) return;
     apply(drag.r + dy / (app.clientHeight || 1), false);
     clearTimeout(idle); idle = setTimeout(fill, 220);   // 잠깐 멈추면 채우기
   });
-  const end = () => {
-    if(!drag) return;
+  const end = e => {
+    if(!drag || (e && e.pointerId !== drag.id)) return;
     h.classList.remove('on');
     if(!drag.moved){ const i = SIZES.findIndex(v => v > r + 0.02); apply(SIZES[i < 0 ? 0 : i], true); }   // 누르면 작게 → 보통 → 크게
     else apply(r, true);
     drag = null; requestAnimationFrame(fill);
   };
-  h.addEventListener('pointerup', end); h.addEventListener('pointercancel', end);
+  h.addEventListener('pointerup', end);
+  h.addEventListener('pointercancel', e => { if(!drag || e.pointerId !== drag.id) return; h.classList.remove('on'); if(drag.moved) apply(r, true); drag = null; requestAnimationFrame(fill); });   // 취소는 '누르기'가 아님
   for(const ev of ['touchstart', 'touchmove']) h.addEventListener(ev, e => { if(e.cancelable) e.preventDefault(); }, {passive:false});
   h.addEventListener('keydown', e => {
     if(e.key === 'ArrowUp'){ e.preventDefault(); apply(r - 0.05, true); fill(); }
