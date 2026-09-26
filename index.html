@@ -2160,12 +2160,24 @@ function makePlace(t, r, day, ord){
   if(!autoArea(t, p)){ const ca = currentArea(t); if(ca && hav(t.areas[ca], p) <= 100000) p.area = ca; }   // 그 지역 근처에서 찾은 곳이면 그 지역으로
   return p;
 }
+const dayName = d => d ? d + '일차' : '보관함';
 function addPlace(r){
   const t = trip(); if(!t || !r || !Number.isFinite(+r.lat)) return;
-  if(placesArr(t).some(p => hav(p, r) < 15 && p.name === r.name)){ toast('이미 추가된 장소예요'); return; }
-  const d = targetDay(), p = makePlace(t, r, d, maxOrd(t, d) + 1000);
+  const d = targetDay(), same = placesArr(t).filter(p => samePlace(p, r)), days = [...new Set(same.map(p => effDay(t, p)))];
+  if(days.includes(d) && !confirm(`‘${r.name}’은(는) 이미 ${dayName(d)}에 있어요. 한 번 더 넣을까요?`)) return;   // 같은 곳을 다른 날에 또 가는 건 그대로 허용
+  const p = makePlace(t, r, d, maxOrd(t, d) + 1000);
   commit([opSet(['places', p.id], p)]);
-  toast(`‘${p.name}’ → ${targetLabel()}`);
+  const others = days.filter(x => x !== d);
+  toast(`‘${p.name}’ → ${targetLabel()}` + (others.length ? ` (${others.map(dayName).join('·')}에도 있어요)` : ''));
+}
+// 이미 넣은 장소를 다른 날에도(복사): 이 날 동선에서 알맞은 자리에
+function copyPlaceTo(id, day){
+  const t = trip(), p = t && t.places[id]; if(!p || !(day >= 1 && day <= nDays(t))) return;
+  const src = {name:p.name, addr:p.addr, lat:p.lat, lng:p.lng, cat:p.cat, stay:p.stay, hours:p.hours, hoursText:p.hoursText, rating:p.rating, reviews:p.reviews, gmaps:p.gmaps, gid:p.gid};
+  const list = dayPlaces(t, day), np = makePlace(t, src, day, ordBetween(list, daySlot(t, day, list, p, true)));
+  if(Array.isArray(p.who)) np.who = p.who.slice();
+  commit([opSet(['places', np.id], np)]);
+  toast(`‘${p.name}’을(를) ${day}일차에도 넣었어요`);
 }
 function movePlace(id, day){
   const t = trip(), p = t?.places[id]; if(!p || effDay(t, p) === day) return;
@@ -2271,6 +2283,7 @@ function itemHtml(t, p, idx, subText, o = {}){
       <label>분류</label><select data-f="cat">${Object.entries(CATS).map(([k, c]) => `<option value="${k}"${k === p.cat ? ' selected' : ''}>${c.label}</option>`).join('')}</select>
       <label>머무는 시간</label><select data-f="stay">${stayOpts.map(v => `<option value="${v}"${v === stayOf(p) ? ' selected' : ''}>${fmtStay(v)}</option>`).join('')}</select>
       <label>일자</label><select data-act="setday">${dayOptions(t, d)}</select>
+      ${nDays(t) > 1 || !d ? `<label>다른 날에도</label><select data-act="copyday"><option value="">날짜를 고르면 복사해서 넣어요</option>${[...Array(nDays(t)).keys()].map(i => i + 1).filter(x => x !== d).map(x => `<option value="${x}">${x}일차${fmtDay(t, x) ? ' ' + fmtDay(t, x) : ''}</option>`).join('')}</select>` : ''}
       <label>시간대</label><select data-f="when"><option value="">상관없음</option>${Object.entries(WHEN).map(([k, w]) => `<option value="${k}"${p.when === k ? ' selected' : ''}>${w.label}</option>`).join('')}</select>
       ${areaIds(t).length ? `<label>지역</label><select data-f="area">${areaOptions(t, p.area && pathOf(t, p.area) ? p.area : '', '자동' + (auto ? ` (${areaShort(t, auto)})` : ' (기타 지역)'))}</select>` : ''}
       ${mm ? `<label>누가</label><div class="wchips">${memberIds(t).map(m => `<button data-who-toggle="${esc(m)}" class="${ws.includes(m) ? 'on' : ''}" style="--c:${mColor(t, m)}">${esc(mName(t, m))}</button>`).join('')}</div>` : ''}
@@ -2686,6 +2699,7 @@ $('#panel').addEventListener('change', e => {
   const item = el.closest('.item'); if(!item) return;
   const id = item.dataset.id, p = t.places[id]; if(!p) return;
   if(act === 'setday') return movePlace(id, +el.value);
+  if(act === 'copyday'){ const nd = +el.value; el.value = ''; if(nd) copyPlaceTo(id, nd); return; }
   const f = el.dataset.f; if(!f) return;
   let v = el.value;
   if(f === 'stay') v = Math.max(0, +v || 0);
@@ -3190,7 +3204,12 @@ function bulkModal(presetDay){
     // 찾은 곳 거르기: 이미 여행에 있는 곳, 여행 지역에서 먼 곳, 목록 안 중복은 체크를 꺼 둔다(맞으면 사용자가 다시 체크)
     const judge = f => {
       const cur = trip();
-      if(cur && placesArr(cur).some(p => samePlace(p, f.r))){ f.on = false; f.why = '이미 있는 장소'; return; }
+      const ex = cur && placesArr(cur).find(p => samePlace(p, f.r));
+      if(ex){
+        const ed = effDay(cur, ex);
+        if(f.it.day != null && f.it.day >= 1 && ed !== f.it.day){ f.why = `${ed ? ed + '일차' : '보관함'}에도 있어요`; return; }   // 다른 날에 또 가는 곳
+        f.on = false; f.why = '이미 있는 장소 · 다른 날에도 넣으려면 체크'; return;
+      }
       const far = f.it.kind === 'list' ? regionDist(cur, near, f.r) > FAR_KM*1000 : (f.r.far && f.it.kind === 'name');
       if(far){ f.on = false; f.why = `여행 지역에서 ${f.r.farKm ?? Math.round(regionDist(cur, near, f.r)/1000)}km 떨어진 곳 · 맞으면 체크`; return; }
       if(found.some(g => g !== f && g.state === 'ok' && g.r && g.on && samePlace(g.r, f.r))){ f.on = false; f.why = '목록에 중복'; }
@@ -3625,11 +3644,12 @@ function addDayModal(d){
     const b = e.target.closest('[data-ri]'); if(!b) return;
     const r = results[+b.dataset.ri], t = trip(); if(!r || !t) return;
     const ex = placesArr(t).find(p => samePlace(p, r)), ed = ex ? effDay(t, ex) : null;
-    if(ex && ed === d){ r.done = '이미 있어요'; drawRes(); return; }
-    if(ex && ed !== 0){ r.done = `이미 ${ed}일차에 있어요`; drawRes(); return; }
-    commit(opsFor([ex ? {p:ex, isNew:false} : {p:r, isNew:true}]));   // 보관함에 있던 곳이면 옮기기
-    r.done = '넣었어요'; drawRes(); drawPool();
-    toast(`‘${ex ? ex.name : r.name}’ → ${d}일차`);
+    if(ex && ed === d && !confirm(`‘${ex.name}’은(는) 이미 ${d}일차에 있어요. 한 번 더 넣을까요?`)) return;
+    const copy = ex && ed !== 0;   // 다른 날(또는 같은 날)에 있던 곳은 하나 더 만들고, 보관함에 있던 곳은 옮김
+    const src = copy ? {name:ex.name, addr:ex.addr, lat:ex.lat, lng:ex.lng, cat:ex.cat, stay:ex.stay, hours:ex.hours, hoursText:ex.hoursText, rating:ex.rating, reviews:ex.reviews, gmaps:ex.gmaps, gid:ex.gid} : r;
+    commit(opsFor([ex && !copy ? {p:ex, isNew:false} : {p:src, isNew:true}]));
+    r.done = copy && ed !== d ? `넣었어요 · ${ed}일차에도 있음` : '넣었어요'; drawRes(); drawPool();
+    toast(`‘${ex ? ex.name : r.name}’ → ${d}일차` + (copy && ed !== d ? ` (${ed}일차에도 있어요)` : ''));
   });
   $m('#adPool').addEventListener('change', e => {
     const c = e.target.closest('[data-pk]'); if(!c) return;
